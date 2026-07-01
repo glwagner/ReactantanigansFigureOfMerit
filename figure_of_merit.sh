@@ -8,13 +8,14 @@
 #
 # Perlmutter has 4 A100 GPUs per node, so 16/32/64 GPUs = 4/8/16 nodes.
 #
-# DEBUG (default): the debug QOS caps at 8 nodes / 30 min, so it fits 16 and 32
-# GPUs (4 and 8 nodes) but NOT 64 (16 nodes):
+# DEBUG (default): the debug QOS caps at 8 nodes / 30 min. The default is the
+# 8-node (32-GPU) FOM; add 16 to also get the 4-node point for weak scaling:
 #
-#   sbatch figure_of_merit.sh                       # GPUS="16 32" on debug, 8 nodes
+#   sbatch figure_of_merit.sh                       # GPUS=32 on debug, 8 nodes
+#   GPUS="16 32" sbatch figure_of_merit.sh          # both points, one allocation
 #
-# 64 GPUs needs the regular QOS; override the in-file directives on the command
-# line (sbatch flags win over #SBATCH):
+# 64 GPUs (16 nodes) needs the regular QOS; override the in-file directives on
+# the command line (sbatch flags win over #SBATCH):
 #
 #   GPUS=64 sbatch --qos=regular --nodes=16 --time=00:20:00 figure_of_merit.sh
 #
@@ -100,7 +101,29 @@ echo "Backend:       $([ "${NCCL}" = 0 ] && echo MPI || echo NCCL)     Float: ${
 echo "julia:         $(${JULIA} --version)"
 echo "=========================================="
 
-for N in ${GPUS:-16 32}; do
+## Preflight: warm the depot with a SINGLE task first, precompiling exactly the
+## modules the run loads. Launching the parallel srun against a cold depot makes
+## every rank precompile at once and contend on one pidfile in shared scratch —
+## a "precompile storm" that can eat an entire allocation. We deliberately do NOT
+## `Pkg.precompile()` the whole project: that pulls in BreezeCloudMicrophysicsExt,
+## which currently fails to precompile (UndefVarError: `Open`) and is unused here
+## (dry dynamics only — `using Breeze` alone does not load CloudMicrophysics).
+echo ">>> Preflight: serial warm of the exact module tree (avoids precompile storm)"
+srun --ntasks=1 --gpus=1 --gpu-bind=none \
+    "${JULIA}" --project="${PROJECT_DIR}/examples" -e '
+        using MPI, Oceananigans, CUDA, NCCL
+        using Breeze
+        using Breeze: CompressibleDynamics
+        using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization
+        println("PREFLIGHT_OK")' \
+    || echo "preflight warm returned rc=$?"
+
+## With the depot warm, forbid the parallel ranks from auto-precompiling: they
+## must load from cache. This makes any remaining gap fail fast instead of
+## triggering a 32-way precompile storm.
+export JULIA_PKG_PRECOMPILE_AUTO=0
+
+for N in ${GPUS:-32}; do
     read -r PX PY <<< "$(partition_for "${N}")"
     if [ -z "${PX}" ]; then
         echo ">>> GPUs=${N}: no partition defined, skipping"

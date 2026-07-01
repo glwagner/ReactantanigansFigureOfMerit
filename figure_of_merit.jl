@@ -58,9 +58,9 @@ using CUDA
 using NCCL
 using Printf
 
-const NCCLExt = Base.get_extension(Oceananigans, :OceananigansNCCLExt)
-NCCLExt === nothing && error("OceananigansNCCLExt extension did not load — check NCCL/CUDA install.")
-const NCCLDistributed = NCCLExt.NCCLDistributed
+## NCCLDistributed is a DistributedComputations function stub, given methods by
+## OceananigansNCCLExt (triggered by `using NCCL` + `using CUDA` above).
+using Oceananigans.DistributedComputations: NCCLDistributed
 
 function argval(flag, default)
     i = findfirst(==(flag), ARGS)
