@@ -81,6 +81,56 @@ Per GPU count, rank 0 prints:
 
 plus a machine-readable `FOM_CSV,...` line.
 
+## Results
+
+### Measured — 1 node, 4× A100 (Perlmutter, 2026-07-01)
+
+Full production per-GPU load (256 × 256 × 128 per GPU, Δx = 50 m, Δt = 0.5 s,
+12 acoustic substeps, WENO-5, Float32, GPU-aware MPI):
+
+| quantity | value |
+|---|---|
+| per-GPU grid | 256 × 256 × 128 |
+| total grid | 512 × 512 × 128 (3.36×10⁷ cells) |
+| ms / step | **481.8** |
+| **wall per 10 min sim** | **578 s** (1200 steps; ≈ 0.96× real time) |
+| cost_forward_run (10 min) | 578 s |
+| **FOM = 2·Nx·Ny·Nz·cost_forward** | **3.88×10¹⁰ GPU-s** = 4.3×10⁷ GPU-h = 1.2×10³ yr serial on 4 GPUs |
+
+This is the per-GPU weak-scaling baseline: `ms/step` (hence `cost_forward_run`)
+is set by the fixed per-GPU work, so it carries directly to higher GPU counts —
+only `Nx·Ny·Nz` grows.
+
+### Projected — 8 nodes, 32× A100 (weak scaling)
+
+Under ideal weak scaling (`cost_forward_run` ≈ constant, cells × 8):
+
+| quantity | value |
+|---|---|
+| total grid | 2048 × 1024 × 128 (2.68×10⁸ cells) |
+| cost_forward_run (10 min) | ≈ 578 s (comm overhead not yet measured) |
+| **FOM (projected)** | **≈ 3.1×10¹¹ GPU-s** = 2.8×10⁹ GPU-h ≈ 9.8×10³ yr serial on 32 GPUs |
+
+**This projection is not yet a measurement.** See the blocker below.
+
+### ⚠ Inter-node execution is currently blocked
+
+Multi-node runs hang at the first inter-node halo exchange (inside `set!`),
+identically for **both** the GPU-aware MPI and NCCL backends:
+
+| config | result |
+|---|---|
+| 1 node / 4 GPUs (any grid size) | ✅ runs, produces FOM |
+| 2 nodes / 8 GPUs | ❌ hangs at first inter-node halo |
+| 8 nodes / 32 GPUs (MPI and NCCL) | ❌ hangs → 30-min timeout |
+
+This is **not specific to this driver**: Breeze's own multi-node
+`distributed_tropical_cyclone` runs at 8–15 nodes also fail (exit 143, no
+stepping). The failure boundary is exactly the node crossing (1 node works,
+≥ 2 nodes hang), and no NCCL `WARN` is emitted before the stall — pointing to a
+system-level GPU-aware inter-node transport problem (GTL / Slingshot-OFI), not a
+bug in the FOM code. Resolving it is a prerequisite for a *measured* 8-node FOM.
+
 ## Running on Perlmutter
 
 The debug QOS caps at **8 nodes / 30 min**, which fits 16 and 32 GPUs (4 and 8

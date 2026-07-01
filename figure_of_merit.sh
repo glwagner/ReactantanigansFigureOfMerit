@@ -47,6 +47,7 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export LD_PRELOAD="${CRAY_MPICH_ROOTDIR:-/opt/cray/pe/mpich/9.0.1}/gtl/lib/libmpi_gtl_cuda.so${LD_PRELOAD:+:${LD_PRELOAD}}"
 export JULIA_CUDA_MEMORY_POOL=none
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-hsn}"
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"   # surfaces transport/init failures
 
 ## NCCL AWS-OFI plugin for CXI/Slingshot RDMA (otherwise NCCL falls back to slow
 ## TCP sockets inter-node). Set PLUGIN=2.18.3 to enable (matches weak_scaling_sweep.sh).
@@ -131,7 +132,7 @@ for N in ${GPUS:-32}; do
     fi
     echo ""
     echo ">>>>>> GPUs = ${N}  (${PX} × ${PY}) <<<<<<"
-    srun --ntasks="${N}" --ntasks-per-node=4 --gpus="${N}" --gpu-bind=none \
+    srun --ntasks="${N}" --ntasks-per-node=4 --gpu-bind=none \
         "${JULIA}" --project="${PROJECT_DIR}/examples" figure_of_merit.jl \
             --px "${PX}" --py "${PY}" \
             --dx "${DX}" --nx-per-gpu "${NX_PER_GPU}" --ny-per-gpu "${NY_PER_GPU}" \
